@@ -7,3 +7,10 @@
 22:00:32 [INFO] Все 9 таблиц на местн
 22:04:06 [INFO] Начинаем создание БД
 22:04:06 [ERROR] Ошибка: Нет файла сземы: C:\Users\artur\Downloads\МДК_02_01\shoe_shop\schema.sql
+23:08:05 [INFO] Начинаем создание БД
+23:08:05 [INFO] Прочитан скрипт схемы: C:\Users\artur\Downloads\МДК_02_01\shoe_shop\schema.sql (3051 байт)
+23:08:05 [INFO] Скрипт выполнен, БД: C:\Users\artur\Downloads\МДК_02_01\shoe_shop\shop.db
+23:08:05 [INFO] Создано таблиц: 9 (Categories, Manufacturers, OrderItems, Orders, Products, Roles, Sizes, Stock, Users)
+23:08:05 [INFO] Создано индексов: 8
+23:08:05 [INFO] Внешние ключи: включены
+23:08:05 [INFO] Все 9 таблиц на местн
