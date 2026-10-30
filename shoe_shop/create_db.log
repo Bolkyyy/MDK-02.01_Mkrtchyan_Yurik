@@ -38,3 +38,10 @@
 17:26:16 [INFO] Создано индексов: 8
 17:26:16 [INFO] Внешние ключи: включены
 17:26:16 [INFO] Все 9 таблиц на местн
+18:02:29 [INFO] Начинаем создание БД
+18:02:29 [INFO] Прочитан скрипт схемы: C:\Users\artur\Downloads\МДК_02_01\shoe_shop\schema.sql (3051 байт)
+18:02:29 [INFO] Скрипт выполнен, БД: C:\Users\artur\Downloads\МДК_02_01\shoe_shop\shop.db
+18:02:29 [INFO] Создано таблиц: 9 (Categories, Manufacturers, OrderItems, Orders, Products, Roles, Sizes, Stock, Users)
+18:02:29 [INFO] Создано индексов: 8
+18:02:29 [INFO] Внешние ключи: включены
+18:02:29 [INFO] Все 9 таблиц на местн

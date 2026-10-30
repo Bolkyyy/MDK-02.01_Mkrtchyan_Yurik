@@ -173,6 +173,89 @@ def api_order_update(body, headers):
     finally:
         conn.close()
 
+def api_users(headers):
+    conn = db()
+    try:
+        error = check_role(conn, headers, STAFF)
+        if error:
+            return error
+        rows = conn.execute(
+            "SELECT u.id, u.full_name, r.name AS role FROM Users u "
+            "JOIN Roles r ON r.id = u.role_id ORDER BY u.full_name").fetchall()
+        return 200, [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+def api_product(query):
+    try:
+        product_id = int(query.get("id", [""])[0])
+    except ValueError:
+        return 400, {"error": "Параметр id должен быть числом"}
+    conn = db()
+    try:
+        row = conn.execute("SELECT id, name, price FROM Products WHERE id = ?", (product_id,)).fetchone()
+        if not row:
+            return 404, {"error": "Товар id={} не найден".format(product_id)}
+        product = dict(row)
+        add_price(product, ordered_last_month(conn))
+        product["sizes"] = [dict(r) for r in conn.execute(
+            "SELECT s.size_id, z.value AS size, s.quantity FROM Stock s "
+            "JOIN Sizes z ON z.id = s.size_id "
+            "WHERE s.product_id = ? AND s.quantity > 0 ORDER BY z.value", (product_id,))]
+        return 200, product
+    finally:
+        conn.close()
+
+def api_order_create(body, headers):
+    conn = db()
+    try:
+        error = check_role(conn, headers, STAFF)
+        if error:
+            return error
+        try:
+            user_id = int(body.get("user_id"))
+            items = [(int(i["product_id"]), int(i["size_id"]), int(i["quantity"]))
+                     for i in body.get("items") or []]
+        except (TypeError, ValueError, KeyError):
+            return 400, {"error": "Неверные данные заказа"}
+        if not items:
+            return 400, {"error": "В заказе нет позиций"}
+        if not conn.execute("SELECT 1 FROM Users WHERE id = ?", (user_id,)).fetchone():
+            return 404, {"error": "Клиент id={} не найден".format(user_id)}
+        ordered = ordered_last_month(conn)
+        prices = []
+        for product_id, size_id, quantity in items:
+            if quantity <= 0:
+                return 400, {"error": "Количество должно быть больше нуля"}
+            row = conn.execute(
+                "SELECT p.id, p.name, p.price, s.quantity FROM Stock s "
+                "JOIN Products p ON p.id = s.product_id "
+                "WHERE s.product_id = ? AND s.size_id = ?", (product_id, size_id)).fetchone()
+            if not row:
+                return 404, {"error": "Товара id={} нужного размера нет на складе".format(product_id)}
+            if row["quantity"] < quantity:
+                return 409, {"error": "Недостаточно товара «{}»: на складе {} шт.".format(
+                    row["name"], row["quantity"])}
+            product = dict(row)
+            add_price(product, ordered)
+            prices.append(product["price_final"])
+        last = conn.execute("SELECT MAX(CAST(order_num AS INTEGER)) FROM Orders").fetchone()[0] or 0
+        cur = conn.execute(
+            "INSERT INTO Orders(order_num, order_date, user_id) VALUES (?, ?, ?)",
+            (str(last + 1), datetime.date.today().isoformat(), user_id))
+        order_id = cur.lastrowid
+        for (product_id, size_id, quantity), price in zip(items, prices):
+            conn.execute(
+                "INSERT INTO OrderItems(order_id, product_id, size_id, quantity, unit_price) "
+                "VALUES (?, ?, ?, ?, ?)", (order_id, product_id, size_id, quantity, price))
+            conn.execute(
+                "UPDATE Stock SET quantity = quantity - ? WHERE product_id = ? AND size_id = ?",
+                (quantity, product_id, size_id))
+        conn.commit()
+        return 200, load_order(conn, order_id)
+    finally:
+        conn.close()
+
 class Handler(BaseHTTPRequestHandler):
     def send_json(self, status, data):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -193,6 +276,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(*api_orders(self.headers))
         elif url.path == "/api/order":
             self.send_json(*api_order(query, self.headers))
+        elif url.path == "/api/users":
+            self.send_json(*api_users(self.headers))
+        elif url.path == "/api/product":
+            self.send_json(*api_product(query))
         else:
             self.send_static(url.path)
 
@@ -216,7 +303,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
-        if path not in ("/api/echo", "/api/order/update"):
+        if path not in ("/api/echo", "/api/order/update", "/api/order/create"):
             self.send_json(404, {"error": "Неизвестный метод API: " + path})
             return
         length = int(self.headers.get("Content-Length", 0))
@@ -231,6 +318,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(400, {"error": "Ожидается JSON-объект"})
         elif path == "/api/order/update":
             self.send_json(*api_order_update(data, self.headers))
+        elif path == "/api/order/create":
+            self.send_json(*api_order_create(data, self.headers))
 
 if __name__ == "__main__":
     HTTPServer.allow_reuse_address = False

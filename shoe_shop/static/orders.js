@@ -127,4 +127,89 @@ async function saveOrder() {
   loadOrders();
 }
 
+async function showAddForm() {
+  let users;
+  try {
+    users = await api("/api/users");
+  } catch (e) {
+    alert(e.message);
+    return;
+  }
+  let options = "";
+  for (const u of users) {
+    options += `<option value="${u.id}">${u.full_name}</option>`;
+  }
+  showModal(`<h2>Новый заказ</h2>
+    <p>Клиент: <select id="new-user">${options}</select></p>
+    <p>Поиск товара: <input id="new-search"> <button onclick="searchProducts()">Найти</button></p>
+    <p>Товар: <select id="new-product" onchange="loadSizes()"></select></p>
+    <p>Размер: <select id="new-size"></select></p>
+    <p>Количество: <input id="new-quantity" type="number" min="1" value="1"></p>
+    <button onclick="createOrder()">Сохранить заказ</button>
+    <button onclick="closeModal()">Отмена</button>`);
+  searchProducts();
+}
+
+async function searchProducts() {
+  const text = document.getElementById("new-search").value.trim();
+  let products;
+  try {
+    products = await api("/api/products?search=" + encodeURIComponent(text));
+  } catch (e) {
+    alert(e.message);
+    return;
+  }
+  let options = "";
+  for (const p of products) {
+    options += `<option value="${p.id}">${p.name} (${p.manufacturer})</option>`;
+  }
+  document.getElementById("new-product").innerHTML = options;
+  loadSizes();
+}
+
+async function loadSizes() {
+  const productId = document.getElementById("new-product").value;
+  let options = "";
+  if (productId) {
+    try {
+      const product = await api("/api/product?id=" + productId);
+      for (const s of product.sizes) {
+        options += `<option value="${s.size_id}">${s.size} (в наличии ${s.quantity})</option>`;
+      }
+    } catch (e) {
+      alert(e.message);
+    }
+  }
+  document.getElementById("new-size").innerHTML = options;
+}
+
+async function createOrder() {
+  const productId = Number(document.getElementById("new-product").value);
+  const sizeId = Number(document.getElementById("new-size").value);
+  const quantity = Number(document.getElementById("new-quantity").value);
+  if (!productId || !sizeId) {
+    alert("Выберите товар и размер");
+    return;
+  }
+  if (!Number.isInteger(quantity) || quantity < 1) {
+    alert("Количество должно быть целым числом больше нуля");
+    return;
+  }
+  const body = {
+    user_id: Number(document.getElementById("new-user").value),
+    items: [{ product_id: productId, size_id: sizeId, quantity: quantity }],
+  };
+  let order;
+  try {
+    order = await api("/api/order/create", body);
+  } catch (e) {
+    alert(e.message);
+    return;
+  }
+  closeModal();
+  alert("Заказ № " + order.order_num + " создан");
+  loadOrders();
+}
+
 document.getElementById("btn-login").onclick = login;
+document.getElementById("btn-add").onclick = showAddForm;
