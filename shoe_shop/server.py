@@ -1,3 +1,4 @@
+import datetime
 import json
 import mimetypes
 import os
@@ -8,6 +9,8 @@ from urllib.parse import parse_qs, urlparse
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.realpath(os.path.join(BASE_DIR, "static"))
 DB_PATH = os.path.join(BASE_DIR, "shop.db")
+DISCOUNT = 0.25
+LOW_STOCK = 3
 
 mimetypes.add_type("text/html", ".html")
 mimetypes.add_type("text/css", ".css")
@@ -32,6 +35,51 @@ def api_login(query):
         return 404, {"error": "Пользователь с логином «{}» не найден".format(login)}
     return 200, dict(row)
 
+def ordered_last_month(conn):
+    first_cur = datetime.date.today().replace(day=1)
+    first_prev = (first_cur - datetime.timedelta(days=1)).replace(day=1)
+    rows = conn.execute(
+        "SELECT DISTINCT oi.product_id FROM OrderItems oi JOIN Orders o ON o.id = oi.order_id "
+        "WHERE o.order_date >= ? AND o.order_date < ?", (first_prev.isoformat(), first_cur.isoformat()))
+    return {r[0] for r in rows}
+
+def add_price(product, ordered):
+    if product["id"] in ordered:
+        product["discount"] = 0
+        product["price_final"] = product["price"]
+    else:
+        product["discount"] = int(DISCOUNT * 100)
+        product["price_final"] = round(product["price"] * (1 - DISCOUNT), 2)
+
+def api_products(query):
+    category = query.get("category", [""])[0].strip()
+    search = query.get("search", [""])[0].strip().lower()
+    sort = query.get("sort", [""])[0].strip()
+    if sort not in ("", "price_asc", "price_desc"):
+        return 400, {"error": "Недопустимое значение sort: " + sort}
+    sql = ("SELECT p.id, p.name, c.name AS category, m.name AS manufacturer, p.description, "
+           "p.price, p.image, "
+           "COALESCE((SELECT SUM(s.quantity) FROM Stock s WHERE s.product_id = p.id), 0) AS stock "
+           "FROM Products p "
+           "JOIN Categories c ON c.id = p.category_id "
+           "JOIN Manufacturers m ON m.id = p.manufacturer_id")
+    params = []
+    if category:
+        sql += " WHERE c.name = ?"
+        params.append(category)
+    conn = db()
+    products = [dict(r) for r in conn.execute(sql + " ORDER BY p.id", params)]
+    ordered = ordered_last_month(conn)
+    conn.close()
+    if search:
+        products = [p for p in products if search in p["name"].lower()]
+    for p in products:
+        add_price(p, ordered)
+        p["stock_level"] = "мало" if p["stock"] <= LOW_STOCK else "много"
+    if sort:
+        products.sort(key=lambda p: p["price_final"], reverse=(sort == "price_desc"))
+    return 200, products
+
 class Handler(BaseHTTPRequestHandler):
     def send_json(self, status, data):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -46,6 +94,8 @@ class Handler(BaseHTTPRequestHandler):
         query = parse_qs(url.query)
         if url.path == "/api/login":
             self.send_json(*api_login(query))
+        elif url.path == "/api/products":
+            self.send_json(*api_products(query))
         else:
             self.send_static(url.path)
 
