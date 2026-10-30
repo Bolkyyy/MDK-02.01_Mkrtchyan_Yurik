@@ -138,6 +138,41 @@ def api_order(query, headers):
     finally:
         conn.close()
 
+def api_order_update(body, headers):
+    conn = db()
+    try:
+        error = check_role(conn, headers, ("Администратор",))
+        if error:
+            return error
+        try:
+            order_id = int(body.get("id"))
+        except (TypeError, ValueError):
+            return 400, {"error": "Не указан id заказа"}
+        if not load_order(conn, order_id):
+            return 404, {"error": "Заказ id={} не найден".format(order_id)}
+        new_date = str(body.get("order_date") or "").strip()
+        if new_date:
+            try:
+                new_date = datetime.date.fromisoformat(new_date).isoformat()
+            except ValueError:
+                return 400, {"error": "Дата должна быть в формате ГГГГ-ММ-ДД"}
+            conn.execute("UPDATE Orders SET order_date = ? WHERE id = ?", (new_date, order_id))
+        for item_id in body.get("delete_items") or []:
+            row = conn.execute(
+                "SELECT product_id, size_id, quantity FROM OrderItems WHERE id = ? AND order_id = ?",
+                (item_id, order_id)).fetchone()
+            if not row:
+                return 404, {"error": "Позиция id={} не найдена в заказе".format(item_id)}
+            conn.execute(
+                "INSERT INTO Stock(product_id, size_id, quantity) VALUES (?, ?, ?) "
+                "ON CONFLICT(product_id, size_id) DO UPDATE SET quantity = quantity + excluded.quantity",
+                (row["product_id"], row["size_id"], row["quantity"]))
+            conn.execute("DELETE FROM OrderItems WHERE id = ?", (item_id,))
+        conn.commit()
+        return 200, load_order(conn, order_id)
+    finally:
+        conn.close()
+
 class Handler(BaseHTTPRequestHandler):
     def send_json(self, status, data):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -181,7 +216,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
-        if path != "/api/echo":
+        if path not in ("/api/echo", "/api/order/update"):
             self.send_json(404, {"error": "Неизвестный метод API: " + path})
             return
         length = int(self.headers.get("Content-Length", 0))
@@ -190,7 +225,12 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             self.send_json(400, {"error": "Некорректный JSON"})
             return
-        self.send_json(200, {"received": data})
+        if path == "/api/echo":
+            self.send_json(200, {"received": data})
+        elif not isinstance(data, dict):
+            self.send_json(400, {"error": "Ожидается JSON-объект"})
+        elif path == "/api/order/update":
+            self.send_json(*api_order_update(data, self.headers))
 
 if __name__ == "__main__":
     HTTPServer.allow_reuse_address = False

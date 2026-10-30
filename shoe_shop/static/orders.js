@@ -1,4 +1,6 @@
 let user = null;
+let currentOrder = null;
+let removedItems = [];
 
 async function api(url, body) {
   const options = { headers: {} };
@@ -63,27 +65,66 @@ async function loadOrders() {
 }
 
 async function openOrder(id) {
-  let order;
   try {
-    order = await api("/api/order?id=" + id);
+    currentOrder = await api("/api/order?id=" + id);
   } catch (e) {
     alert(e.message);
     return;
   }
+  removedItems = [];
+  const admin = user.role === "Администратор";
   let rows = "";
-  for (const item of order.items) {
-    rows += `<tr><td>${item.product}</td><td>${item.size}</td>` +
-      `<td>${item.quantity}</td><td>${item.unit_price}</td><td>${item.sum}</td></tr>`;
+  for (const item of currentOrder.items) {
+    rows += `<tr id="item-${item.id}"><td>${item.product}</td><td>${item.size}</td>` +
+      `<td>${item.quantity}</td><td>${item.unit_price}</td><td>${item.sum}</td>`;
+    if (admin) {
+      rows += `<td><button onclick="removeItem(${item.id})">Удалить</button></td>`;
+    }
+    rows += "</tr>";
   }
-  showModal(`<h2>Заказ № ${order.order_num}</h2>
-    <p>Дата: ${order.order_date}</p>
-    <p>Клиент: ${order.full_name}</p>
+  let date = currentOrder.order_date;
+  let buttons = `<button onclick="closeModal()">Закрыть</button>`;
+  if (admin) {
+    date = `<input type="date" id="order-date" value="${currentOrder.order_date}">`;
+    buttons = `<button onclick="saveOrder()">Сохранить изменения</button> ` + buttons;
+  }
+  showModal(`<h2>Заказ № ${currentOrder.order_num}</h2>
+    <p>Дата: ${date}</p>
+    <p>Клиент: ${currentOrder.full_name}</p>
     <table>
-      <tr><th>Товар</th><th>Размер</th><th>Количество</th><th>Цена</th><th>Сумма</th></tr>
+      <tr><th>Товар</th><th>Размер</th><th>Количество</th><th>Цена</th><th>Сумма</th>${admin ? "<th></th>" : ""}</tr>
       ${rows}
     </table>
-    <p><b>Итого: ${order.total}</b></p>
-    <button onclick="closeModal()">Закрыть</button>`);
+    <p><b>Итого: ${currentOrder.total}</b></p>
+    ${buttons}`);
+}
+
+function removeItem(itemId) {
+  const row = document.getElementById("item-" + itemId);
+  if (removedItems.includes(itemId)) {
+    removedItems = removedItems.filter((id) => id !== itemId);
+    row.classList.remove("removed");
+  } else {
+    removedItems.push(itemId);
+    row.classList.add("removed");
+  }
+}
+
+async function saveOrder() {
+  const body = {
+    id: currentOrder.id,
+    order_date: document.getElementById("order-date").value,
+    delete_items: removedItems,
+  };
+  try {
+    await api("/api/order/update", body);
+  } catch (e) {
+    alert(e.message);
+    return;
+  }
+  closeModal();
+  alert("Изменения сохранены");
+  loadOrders();
 }
 
 document.getElementById("btn-login").onclick = login;
