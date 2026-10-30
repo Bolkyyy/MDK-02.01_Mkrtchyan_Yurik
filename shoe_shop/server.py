@@ -4,13 +4,14 @@ import mimetypes
 import os
 import sqlite3
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.realpath(os.path.join(BASE_DIR, "static"))
 DB_PATH = os.path.join(BASE_DIR, "shop.db")
 DISCOUNT = 0.25
 LOW_STOCK = 3
+STAFF = ("Менеджер", "Администратор")
 
 mimetypes.add_type("text/html", ".html")
 mimetypes.add_type("text/css", ".css")
@@ -80,6 +81,63 @@ def api_products(query):
         products.sort(key=lambda p: p["price_final"], reverse=(sort == "price_desc"))
     return 200, products
 
+def check_role(conn, headers, roles):
+    login = unquote(headers.get("X-User-Login", "")).strip()
+    row = conn.execute(
+        "SELECT r.name FROM Users u JOIN Roles r ON r.id = u.role_id WHERE u.login = ?",
+        (login,)).fetchone()
+    if not row:
+        return 401, {"error": "Требуется вход в систему"}
+    if row[0] not in roles:
+        return 403, {"error": "Недостаточно прав: нужна роль " + " или ".join(roles)}
+    return None
+
+def load_order(conn, order_id):
+    head = conn.execute(
+        "SELECT o.id, o.order_num, o.order_date, u.full_name FROM Orders o "
+        "JOIN Users u ON u.id = o.user_id WHERE o.id = ?", (order_id,)).fetchone()
+    if not head:
+        return None
+    order = dict(head)
+    order["items"] = [dict(r) for r in conn.execute(
+        "SELECT oi.id, p.name AS product, z.value AS size, oi.quantity, oi.unit_price, "
+        "oi.quantity * oi.unit_price AS sum FROM OrderItems oi "
+        "JOIN Products p ON p.id = oi.product_id "
+        "JOIN Sizes z ON z.id = oi.size_id "
+        "WHERE oi.order_id = ? ORDER BY oi.id", (order_id,))]
+    order["total"] = sum(i["sum"] for i in order["items"])
+    return order
+
+def api_orders(headers):
+    conn = db()
+    try:
+        error = check_role(conn, headers, STAFF)
+        if error:
+            return error
+        rows = conn.execute(
+            "SELECT o.id, o.order_num, o.order_date, u.full_name FROM Orders o "
+            "JOIN Users u ON u.id = o.user_id ORDER BY o.id").fetchall()
+        return 200, [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+def api_order(query, headers):
+    conn = db()
+    try:
+        error = check_role(conn, headers, STAFF)
+        if error:
+            return error
+        try:
+            order_id = int(query.get("id", [""])[0])
+        except ValueError:
+            return 400, {"error": "Параметр id должен быть числом"}
+        order = load_order(conn, order_id)
+        if not order:
+            return 404, {"error": "Заказ id={} не найден".format(order_id)}
+        return 200, order
+    finally:
+        conn.close()
+
 class Handler(BaseHTTPRequestHandler):
     def send_json(self, status, data):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -96,6 +154,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(*api_login(query))
         elif url.path == "/api/products":
             self.send_json(*api_products(query))
+        elif url.path == "/api/orders":
+            self.send_json(*api_orders(self.headers))
+        elif url.path == "/api/order":
+            self.send_json(*api_order(query, self.headers))
         else:
             self.send_static(url.path)
 

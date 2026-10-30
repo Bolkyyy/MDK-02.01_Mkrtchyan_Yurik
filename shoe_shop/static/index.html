@@ -1,11 +1,33 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Практическая 2.1</title>
+  <meta charset="utf-8">
+  <title>Практическая №2.1-№3.1</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    table { border-collapse: collapse; margin: 10px 0; }
+    th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; }
+    th { background: #eee; }
+    .hidden { display: none; }
+    .modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.4); display: flex; align-items: center; justify-content: center; }
+    .modal.hidden { display: none; }
+    .modal-box { background: #fff; padding: 20px; max-width: 800px; max-height: 90vh; overflow: auto; }
+    .removed td { text-decoration: line-through; color: #999; }
+  </style>
 </head>
 <body>
-    <h1>ТЕСТ</h1>
+  <h1>Заказы</h1>
+  <p>
+    <input id="login" placeholder="Логин">
+    <button id="btn-login">Войти</button>
+    <span id="user"></span>
+  </p>
+  <div id="panel" class="hidden">
+    <table id="orders"></table>
+  </div>
+  <div id="modal" class="modal hidden">
+    <div class="modal-box" id="modal-box"></div>
+  </div>
+  <script src="orders.js"></script>
 </body>
 </html>
